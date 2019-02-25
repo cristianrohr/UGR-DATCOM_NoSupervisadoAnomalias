@@ -1,0 +1,1325 @@
+---
+title: "Trabajo Práctico"
+author: "Cristian Rohr"
+date: "31 de enero de 2018"
+output:
+  pdf_document:
+    number_sections: true
+---
+
+\newpage
+\tableofcontents
+\newpage
+
+
+```{r setup, include=FALSE, results = 'hide', show = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# M?ster -> Detecci?n de anomal?as
+# Juan Carlos Cubero. Universidad de Granada
+
+###########################################################################
+# Paquetes usados a lo largo del curso
+###########################################################################
+
+
+
+#Gr?ficos
+#install.packages("ggplot2")
+
+library(ggplot2)
+
+#install.packages("devtools")
+library(devtools)
+
+#install_github("ggbiplot", "vqv")
+library(reshape)   # melt
+library(ggbiplot)
+
+#install.packages("rgl")     #plot3D
+#library(rgl)  
+               
+#install.packages("GGally")  #ggpairs
+library(GGally)
+
+
+################################################################################
+# 1-variate
+
+#install.packages("outliers")  # Grubb
+library(outliers)
+
+#install.packages("EnvStats")  # Rosner
+library(EnvStats)
+
+################################################################################
+
+# Multi-variate -Mahalanobis-
+
+#install.packages("mvoutlier")  #MCD ChiC
+library(mvoutlier)       
+
+#install.packages("CerioliOutlierDetection")  #MCD Hardin Rocke
+#library(CerioliOutlierDetection)
+
+#install.packages("robustbase")
+#library(robustbase)
+
+#install.packages("mvnormtest")   # Test Normalidad multivariante
+#library(mvnormtest)   
+
+library(MASS) 
+
+################################################################################
+
+# Multivariate Unsupervised
+
+#install.packages("DMwR")  #lof
+library(DMwR)
+
+#install.packages("cluster")
+library(cluster)    # PAM
+
+library(ggrepel)
+
+# M?ster -> Detecci?n de anomal?as
+# Juan Carlos Cubero. Universidad de Granada
+
+###########################################################################
+# Funciones utilizadas a lo largo del curso
+###########################################################################
+
+
+rm(list=ls()) 
+
+
+#######################################################################
+# Muestra un plot b?sico con los outliers en rojo
+# Necesita como par?metros de entrada:
+# el dataset "datos", un vector de T/F indicando si el registro i-?simo 
+# de "datos" es o no un outlier (seg?n el m?todo aplicado) 
+# y el t?tulo a aparecer en el gr?fico
+
+MiPlot_Univariate_Outliers = function (datos, indices_de_Outliers, titulo){
+  numero.de.datos = nrow(as.matrix(datos))
+  vectorTFoutliers =  rep(FALSE, numero.de.datos)
+  vectorTFoutliers[indices_de_Outliers] = TRUE
+  vector.colores.outlier = rep("black", numero.de.datos)
+  vector.colores.outlier [vectorTFoutliers] = "red"
+  
+  cat("\nN?mero de datos: ")
+  cat(numero.de.datos)
+  cat("\n?Qui?n es outlier?: ")
+  cat(vectorTFoutliers)
+  cat('\n')
+  
+  # X11()
+  plot(datos, col=vector.colores.outlier, main = titulo)
+}
+
+
+
+###########################################################################
+# Calcula los outliers IQR 
+# Devuelve un vector TRUE/FALSE indicando si el registro i-?simo 
+# de "datos" es o no un outlier IQR con respecto a la columna de ?ndice "indice"
+# coef es 1.5 para los outliers normales y hay que pasarle 3 para los outliers extremos
+
+vector_es_outlier_IQR = function (datos, indice.de.columna, coef = 1.5){
+  columna.datos = datos[,indice.de.columna]
+  cuartil.primero = quantile(columna.datos)[2]  #quantile[1] es el m?nimo y quantile[5] el m?ximo.
+  cuartil.tercero = quantile(columna.datos)[4] 
+  iqr = cuartil.tercero - cuartil.primero
+  extremo.superior.outlier = (iqr * coef) + cuartil.tercero
+  extremo.inferior.outlier = cuartil.primero - (iqr * coef)
+  es.outlier  = columna.datos > extremo.superior.outlier |
+    columna.datos < extremo.inferior.outlier
+  return (es.outlier)
+}
+
+vector_claves_outliers_IQR = function(datos, indice, coef = 1.5){
+  columna.datos = datos[,indice]
+  vector.de.outliers = vector_es_outlier_IQR(datos, indice, coef)
+  return (which(vector.de.outliers  == TRUE))
+}
+
+
+
+#######################################################################
+# Devuelve los nombres de aquellas filas de datos especificadas 
+# en el segundo par?metro (vector de T/F)
+
+Nombres_de_Filas = function (datos, vector_TF_datos_a_incluir) {
+  numero.de.filas = nrow(datos)
+  
+  if (is.null(row.names(datos)))
+    row.names(datos) = rep(1:numero.de.filas)
+  
+  nombres.de.filas = rep("", numero.de.filas)
+  nombres.de.filas[vector_TF_datos_a_incluir==TRUE] = 
+        row.names(datos)[vector_TF_datos_a_incluir==TRUE]
+  return (nombres.de.filas)
+}
+
+
+
+#######################################################################
+# Calcula los outliers IQR y muestra sus etiquetas en un BoxPlot
+
+MiBoxPlot_IQR_Univariate_Outliers = function (datos, indice.de.columna, coef = 1.5){
+  # Importante: Para que aes busque los par?metros en el ?mbito local, 
+  # debe incluirse  environment = environment()
+  
+  datos = as.data.frame(datos)
+  vector.TF.outliers.IQR = vector_es_outlier_IQR(datos, indice.de.columna, coef)
+  nombres.de.filas = Nombres_de_Filas(datos, vector.TF.outliers.IQR)
+  nombre.de.columna = colnames(datos)[indice.columna]
+  
+  ggboxplot = ggplot(data = datos, 
+                     aes(x=factor(""), 
+                     y=datos[,indice.de.columna]) , 
+                     environment = environment()) + 
+    xlab(nombre.de.columna) + ylab("") +
+    geom_boxplot(outlier.colour = "red") + 
+    geom_text_repel(aes(label = nombres.de.filas)) #, position = position_jitter(width = 0.1))   
+  
+  # X11()
+  ggboxplot
+}
+
+
+
+#######################################################################
+# Muestra de forma conjunta todos los BoxPlots de las columnas de datos
+# Para ello, normaliza los datos.
+# Tambi?n muestra con un punto en rojo los outliers de cada columna
+# Requiere reshape
+
+
+MiBoxPlot_juntos  = function (datos, vector_TF_datos_a_incluir = c()){  
+  # Importante: Para que aes busque los par?metros en el ?mbito local, 
+  # debe incluirse  environment = environment()
+  
+  # Para hacerlo con ggplot, lamentablemente hay que construir antes una tabla 
+  # que contenga en cada fila el valor que a cada tupla le da cada variable 
+  # -> paquete reshape->melt
+  
+  # Por ejemplo, si tenemos el siguiente data frame
+  
+  # datos = data.frame(
+  #   A  = c(1, 2),
+  #   B = c(3, 4)
+  # )
+  # datos =
+  #     A  B
+  #     1  3
+  #     2  4
+  
+  # melt(datos) construye esta tabla:
+  
+  #      variable value
+  # 1        A     1
+  # 2        A     2
+  # 3        B     3
+  # 4        B     4
+
+  
+  nombres.de.filas = Nombres_de_Filas(datos, vector_TF_datos_a_incluir)
+  
+  datos = scale(datos)
+  datos.melted = melt(datos)
+  colnames(datos.melted)[2]="Variables"
+  colnames(datos.melted)[3]="zscore"
+  factor.melted = colnames(datos.melted)[1]
+  columna.factor = as.factor(datos.melted[,factor.melted])
+  levels(columna.factor)[!levels(columna.factor) %in% nombres.de.filas] = ""  
+  
+  ggplot(data = datos.melted, aes(x=Variables, y=zscore), environment = environment()) + 
+    geom_boxplot(outlier.colour = "red") + 
+    geom_text(aes(label = columna.factor), size = 3) 
+}
+
+
+
+#######################################################################
+# Muestra de forma conjunta todos los BoxPlots de las columnas de datos
+# Para ello, normaliza los datos
+# Tambi?n muestra las etiquetas de los outliers de cada columna
+
+
+MiBoxPlot_juntos_con_etiquetas = function (datos, coef = 1.5){
+  # Aplicamos outlier IQR a cada columna
+  
+  matriz.datos.TF.outliers = 
+    sapply(1:ncol(datos), function(x) vector_es_outlier_IQR(datos, x, coef))  
+  
+  vector.datos.TF.outliers = apply(matriz.datos.TF.outliers, 1, sum)   
+  vector.datos.TF.outliers[vector.datos.TF.outliers > 1] = 1 # Si un registro es outlier en alguna columna lo incluimos
+  
+  MiBoxPlot_juntos(datos, vector.datos.TF.outliers)
+}
+
+
+
+#######################################################################
+# Aplica el test de Grubbs e imprime los resultados
+
+MiPlot_resultados_TestGrubbs = function(datos){
+  alpha = 0.05
+  
+  test.de.Grubbs = grubbs.test(datos, two.sided = TRUE)
+  cat('p.value: ')
+  cat(test.de.Grubbs$p.value)
+  cat('\n')
+  
+  if (test.de.Grubbs$p.value < alpha){
+    indice.de.outlier.Grubbs = order(abs(datos - mean(datos)), decreasing = T)[1]
+    indice.de.outlier.Grubbs
+    cat('?ndice de outlier: ')
+    cat(indice.de.outlier.Grubbs)
+    cat('\n')
+    valor.de.outlier.Grubbs  = datos[indice.de.outlier.Grubbs]
+    cat('Valor del outlier: ')
+    cat(valor.de.outlier.Grubbs)
+    MiPlot_Univariate_Outliers (datos, indice.de.outlier.Grubbs, "Test de Grubbs")
+  }
+  else
+    cat('No hay outliers')
+}
+
+
+#######################################################################
+# Aplica el test de Rosner e imprime los resultados
+
+MiPlot_resultados_TestRosner = function(datos){  
+  test.de.rosner = rosnerTest(datos, k=4)
+  is.outlier.rosner = test.de.rosner$all.stats$Outlier
+  k.mayores.desviaciones.de.la.media = test.de.rosner$all.stats$Obs.Num
+  indices.de.outliers.rosner = k.mayores.desviaciones.de.la.media[is.outlier.rosner]
+  valores.de.outliers.rosner = datos[indices.de.outliers.rosner]
+  
+  cat("\nTest de Rosner")
+  cat("\n?ndices de las k-mayores desviaciones de la media: ")
+  cat(k.mayores.desviaciones.de.la.media)
+  cat("\nDe las k mayores desviaciones, ?Qui?n es outlier? ")
+  cat(is.outlier.rosner)
+  cat("\nLos ?ndices de los outliers son: ")
+  cat(indices.de.outliers.rosner)
+  cat("\nLos valores de los outliers son: ")
+  cat(valores.de.outliers.rosner)
+  
+  MiPlot_Univariate_Outliers (datos, indices.de.outliers.rosner, "Test de Rosner")
+}
+
+
+MiBiplot = function(datos){
+  PCA.model = princomp(scale(datos))
+  biplot = ggbiplot(PCA.model, obs.scale = 1, var.scale=1 , varname.size = 5,alpha = 1/2) 
+  # X11()
+  print(biplot)
+}
+
+MiBiPlot_Multivariate_Outliers = function (datos, vectorTFoutliers, titulo){
+   identificadores_de_datos = rownames(datos)
+   identificadores_de_datos[!vectorTFoutliers] = ''
+   cat(identificadores_de_datos)
+ 
+   PCA.model = princomp(scale(datos))
+   outlier.shapes = c(".","x") #c(21,8)
+   biplot = ggbiplot(PCA.model, 
+                     obs.scale = 1, 
+                     var.scale=1 , 
+                     varname.size = 5,
+                     groups =  vectorTFoutliers, 
+                     alpha = 1/2) #alpha = 1/10
+   biplot = biplot + labs(color = "Outliers")
+   biplot = biplot + scale_color_manual(values = c("black","red"))
+   biplot = biplot + geom_text(label = identificadores_de_datos, 
+                               stat = "identity", 
+                               size = 3, 
+                               hjust=0, 
+                               vjust=0)
+   biplot = biplot + ggtitle(titulo)
+  
+   # X11()
+   print(biplot)
+}
+
+
+# Dentro de MiBiPlot_Clustering_Outliers se llama a la funci?n ggbiplot, la cual est? basada
+# en la funci?n ggplot que tiene un bug de dise?o ya que dentro del par?metro aes
+# s?lo se pueden llamar a variables del entorno global y no del entorno local.
+# Por tanto, desgraciadamente, debemos establecer variables globales que 
+# son usadas dentro de nuestra funci?n MiBiPlot_Clustering_Outliers:
+# BIPLOT.isOutlier
+# BIPLOT.asignaciones.clusters
+# BIPLOT.cluster.colors
+
+MiBiPlot_Clustering_Outliers = function (datos, titulo){
+  PCA.model = princomp(scale(datos))
+  outlier.shapes = c("o","x") #c(21,8)
+  
+  identificadores_de_datos = rownames(datos)
+  identificadores_de_datos[!BIPLOT.isOutlier] = ''
+  #cat(identificadores_de_datos)
+  
+  BIPLOT.asignaciones.clusters = factor(BIPLOT.asignaciones.clusters)
+  
+  biplot = ggbiplot(PCA.model, obs.scale = 1, var.scale=1 , varname.size = 3, alpha = 0) +              
+    geom_point(aes(shape = BIPLOT.isOutlier, colour = factor(BIPLOT.asignaciones.clusters)))  +
+    scale_color_manual(values = BIPLOT.cluster.colors) +
+    scale_shape_manual(values = outlier.shapes) +
+    ggtitle(titulo) +
+    geom_text(label = identificadores_de_datos, stat = "identity", size = 3, hjust=0, vjust=0)      
+  
+  # X11()
+  print(biplot)
+}
+
+
+
+
+```
+
+# UNIVARIATE STATISTICAL OUTLIERS -> IQR
+
+Detección heurística de Outliers en 1 variable según el método IQR.
+
+Voy a trabajar con el set de datos _**PimaIndiansDiabetes**_ (https://data.world/uci/pima-indians-diabetes).
+
+**Nota: Dejo el codigo utilizado para cargar y preprocesar el dataset, para que se comprenda el contenido final del mismo.**
+
+```{r load, message = FALSE, echo = FALSE}
+# Carga del set de datos
+library(mlbench)
+data(PimaIndiansDiabetes)
+mydata.numeric <- PimaIndiansDiabetes 
+# Examino la estructura del dataset
+str(mydata.numeric)
+```
+
+Me quedo con las siguientes columnas: 2-7
+
+Cada columna tiene el siguiente significado:
+
+- Plasma glucose concentration a 2 hours in an oral glucose tolerance test 
+- Diastolic blood pressure (mm Hg) 
+- Triceps skin fold thickness (mm) 
+- 2-Hour serum insulin (mu U/ml) 
+- Body mass index (weight in kg/(height in m)^2) 
+- Diabetes pedigree function
+
+**Nota:** Los valores codificados como 0 corresponden a missing data. Eliminare las observaciones con valores faltantes en alguna de sus columnas.
+
+```{r preproc2}
+# Selecciono las columnas de interes
+mydata.numeric  = mydata.numeric[, c(2:7)]
+
+# Recodifico 0 como NA
+is.na(mydata.numeric) <- !mydata.numeric
+# Elimino filas con missing data
+mydata.numeric <- mydata.numeric[complete.cases(mydata.numeric), ]
+
+# Asigno nombre a las filas. Agrego el prefijo 'S'
+nombres <- paste("S", seq(1:nrow(mydata.numeric)), sep = "")
+rownames(mydata.numeric) <- nombres
+
+# Columna sobre la que trabajare
+indice.columna  = 4 # insulin
+nombre.mydata   = "pima"
+```
+
+Preparación de datos
+
+```{r prep}
+mydata.numeric.scaled = scale(mydata.numeric) # Normalizo
+columna         = mydata.numeric[, indice.columna] # Me quedo con la columna de interés
+nombre.columna  = names(mydata.numeric)[indice.columna] # Nombre de la columna de interés
+columna.scaled  = mydata.numeric.scaled[, indice.columna] # Columna de interés normalizada
+
+# Backups de datos
+mydata.numeric.backup <- mydata.numeric
+mydata.numeric.scaled.backup <- mydata.numeric.scaled
+```
+
+
+## Parte primera. Cómputo de los outliers IQR
+
+### Calcular los outliers según la regla IQR. Directamente sin funciones propias
+
+```{r 1ero}
+quantiles <- quantile(columna, c(0.25, 0.5, 0.75)) # Obtengo cuantiles
+cuartil.primero <- quantiles[1] # Primer cuartil
+cuartil.tercero <- quantiles[3] # Tercer cuartil
+iqr <- cuartil.tercero - cuartil.primero # Rango intercuartil
+
+# Valor de corte superior para outliers normales
+extremo.superior.outlier.normal  = cuartil.tercero + 1.5*iqr 
+# Valor de corte inferior para outliers normales
+extremo.inferior.outlier.normal  = cuartil.primero - 1.5*iqr 
+# Valor de corte superior para outliers extremos
+extremo.superior.outlier.extremo = cuartil.tercero + 3*iqr 
+# Valor de corte inferior para outliers extremos
+extremo.inferior.outlier.extremo = cuartil.primero - 3*iqr 
+
+vector.es.outlier.normal <- ifelse(columna < extremo.inferior.outlier.normal, 
+                                   TRUE,
+                                   ifelse(columna > extremo.superior.outlier.normal,
+                                          TRUE, FALSE))
+
+print("Total de observacioness")
+length(vector.es.outlier.normal) # Total de observaciones
+```
+
+¿Cuantos outliers normales hay?
+
+Hay `r sum(vector.es.outlier.normal)` outliers normales.
+
+¿Cuantos outliers extremos hay?
+```{r 1erob}
+vector.es.outlier.extremo <- ifelse(columna < extremo.inferior.outlier.extremo,
+                                    TRUE,
+                                    ifelse(columna > extremo.superior.outlier.extremo,
+                                           TRUE, FALSE))
+```
+
+Hay `r sum(vector.es.outlier.extremo)` outliers extremos.
+
+Se calcularon los valores de corte para definir si una observación es un outlier o no. Definimos outliers normales como aquellos que estan por fuera del rango definido por: [1er cuartil - 1.5*IQR, 3er cuartil + 1.5*IQR], donde IQR es el rango intercuartil.
+
+Los outliers extremos son aquellos fuera del rango [1er cuartil - 3*IQR, 3er cuartil + 3*IQR].
+
+Se crearon vectores booleanos que indican si cada observación es un outlier normal u extemo. Y se calculo el total de observaciones que son outliers normales y extremos.
+
+## Índices y valores de los outliers
+
+**Outliers normales**
+
+```{r 2do}
+claves.outliers.normales <- which(vector.es.outlier.normal)
+claves.outliers.normales
+```
+
+Obtuvimos los índices del vector de aquellos valores que son outliers normales para la columna _insulin_.
+
+```{r 2doa}
+data.frame.outliers.normales <- mydata.numeric[claves.outliers.normales, ]
+data.frame.outliers.normales
+```
+
+Mostramos un dataframe con las muestras que son outliers normales para la columna _insulin_.
+
+```{r 2dob}
+nombres.outliers.normales <- row.names(data.frame.outliers.normales)
+nombres.outliers.normales
+```
+
+Mostramos el nombre de las muestras que son outliers normales para la columna _insulin_.
+
+```{r 2doc}
+valores.outliers.normales <- mydata.numeric[vector.es.outlier.normal, nombre.columna]
+valores.outliers.normales
+```
+
+Mostramos los valores que son outliers normales para la columna _insulin_.
+
+Con los comandos anteriores obtuve los índices (número de fila) de los outliers normales, un dataframe que contiene las filas que tienen los outliers normales, los nombres de las muestras con los outliers normales y los valores de los outliers normales.
+
+**Outliers extremos**
+
+```{r 2dod}
+claves.outliers.extremos <- which(vector.es.outlier.extremo)
+claves.outliers.extremos
+```
+
+```{r 2doe}
+data.frame.outliers.extremos <- mydata.numeric[vector.es.outlier.extremo, ]
+data.frame.outliers.extremos
+```
+
+```{r 2dof}
+nombres.outliers.extremos <- row.names(data.frame.outliers.extremos)
+nombres.outliers.extremos
+```
+
+```{r 2dog}
+valores.outliers.extremos <- mydata.numeric[vector.es.outlier.extremo, nombre.columna]
+valores.outliers.extremos
+```
+
+Con los comandos anteriores obtuve los índices (número de fila) de los outliers extremos, un dataframe que contiene las filas que tienen los outliers extremos, los nombres de las muestras con los outliers extremos y los valores de los outliers extremos.
+
+
+## Desviación de los outliers con respecto a la media de la columna
+```{r 3ro}
+valores.normalizados.outliers.normales <- columna.scaled[vector.es.outlier.normal]
+valores.normalizados.outliers.normales
+```
+
+Me fijo cuanto se desvian los outliers con respecto a la media de la columna. Recordar que los datos fueron normalizados con un Z-score.
+
+Repito paralos outliers extremos
+```{r 3rob}
+valores.normalizados.outliers.extremos <- columna.scaled[vector.es.outlier.extremo]
+valores.normalizados.outliers.extremos
+```
+
+
+## Plot
+```{r 4to}
+# Primero lo hago con los datos sin normalizar
+# outliers normales
+MiPlot_Univariate_Outliers(columna, claves.outliers.normales, nombre.columna) 
+# outliers extremos
+MiPlot_Univariate_Outliers(columna, claves.outliers.extremos, nombre.columna) 
+
+# Repito con los datos normalizados
+# Outliers normales
+MiPlot_Univariate_Outliers(columna.scaled, claves.outliers.normales, nombre.columna)
+# Outliers extremos
+MiPlot_Univariate_Outliers(columna.scaled, claves.outliers.extremos, nombre.columna)
+```
+
+Gráfico de puntos, de los índices vs el valor. 
+Se pueden observar a los outliers marcados en color rojo (tanto extremos como normales, dependiendo del gráfico).
+
+Al observar el gráfico normalizado y no normalizado son iguales, cambia la escala del eje Y, pero no la distancia entre los datos. La normalización no afecta la posición de los datos.
+
+## Boxplot
+
+```{r 5to}
+# Outliers normales
+# Datos sin normalizar
+plot.out.normales.sinnormalizar <- MiBoxPlot_IQR_Univariate_Outliers(datos = mydata.numeric,
+                                  indice.de.columna = indice.columna, 
+                                  coef = 1.5) 
+plot.out.normales.sinnormalizar <- plot.out.normales.sinnormalizar + 
+  ggtitle("Outliers normales, sin normalizar")
+plot.out.normales.sinnormalizar
+
+# Datos Normalizados
+plot.out.normales.normalizados <- MiBoxPlot_IQR_Univariate_Outliers(mydata.numeric.scaled, 
+                                  indice.columna, 
+                                  coef = 1.5) 
+
+plot.out.normales.normalizados <- plot.out.normales.normalizados + 
+  ggtitle("Outliers normales, normalizados")
+plot.out.normales.normalizados
+
+# Outliers extremos
+# Para ver los outliers extremos, debo setear el coeficiente en 3
+# Datos sin normalizar
+plot.out.extremos.sinnormalizar <- MiBoxPlot_IQR_Univariate_Outliers(datos = mydata.numeric, 
+                                  indice.de.columna = indice.columna, 
+                                  coef = 3)
+plot.out.extremos.sinnormalizar <- plot.out.extremos.sinnormalizar + 
+  ggtitle("Outliers extremos, sin normalizar")
+plot.out.extremos.sinnormalizar
+
+# Datos normalizados
+plot.out.extremos.normalizados <- MiBoxPlot_IQR_Univariate_Outliers(mydata.numeric.scaled, 
+                                  indice.columna,
+                                  coef = 3)
+plot.out.extremos.normalizados <- plot.out.extremos.normalizados + 
+  ggtitle("Outliers extremos, normalizados")
+plot.out.extremos.normalizados
+```
+
+Gráficos de caja para outliers normales (datos sin normalizar y normalizados) y para outliers extremos (datos normalizados y sin normalizar).
+
+Cuando comparo los datos normalizados y no normalizados, vemos que el Boxplot es el mismo ya que la normalización no afecta a la posición relativa de los datos. Se pueden observar como los outliers estan por fuera de la caja que marca el comienzo y fin del 1er y 3er cuartil, y de la línea solida que continua, que marca el punto a partir del cual nos alejamos 1.5 veces del rango intercuartil
+
+**Nota: Hize una modificación a la función entregada en clase, para usar geom_text_repel del paquete ggrepel en lugar de geom_text, para evitar la superposición de las etiquetas.**
+
+
+## Cómputo de los outliers IQR con funciones propias
+
+```{r 6to}
+# Outliers normales
+print("Vector booleano que indica si un valor es outlier normal")
+vector_es_outlier_IQR(datos = mydata.numeric,
+                      indice.de.columna = indice.columna, 
+                      coef = 1.5)  
+print("\n")
+print("Índices de los outliers normales")
+# Outliers normales
+vector_claves_outliers_IQR(mydata.numeric, indice.columna, coef = 1.5)
+
+print("\n")
+print("Vector booleano que indica si un valor es outlier extremo")
+# Outliers extremos
+vector_es_outlier_IQR(mydata.numeric, indice.columna, coef = 3) 
+print("\n")
+print("Índices de los outliers extremos")
+# Outliers extremos
+vector_claves_outliers_IQR(mydata.numeric, indice.columna, coef = 3)
+
+```
+
+La función vector_es_outlier_IQR devuelve un vector de booleanos indicando si un dato es outlier o no, en una determinada columna de un dataframe, de acuerdo a un coeficiente aplicado al rango intercuartil. Si el parámetro **coef** es 1.5 calculamos los llamados outliers normales, si es 3 los llamados outliers extremos.
+
+La función vector_claves_outliers_IQR retorna los índices de los outliers, nuevamente depende del parámetro **coef** calcularemos los outliers normales o extremos.
+
+## BoxPlot 2
+```{r 7to}
+# Outliers normales
+MiBoxPlot_juntos(mydata.numeric)  
+MiBoxPlot_juntos_con_etiquetas(mydata.numeric)
+MiBoxPlot_juntos(mydata.numeric, vector.es.outlier.normal)
+```
+
+**Nota**: la función MiBoxPlot_juntos etiqueta los outliers, si se le pasa el vector booleano de outliers
+
+Todos los outliers para _Insulin_ no son outliers para otras variables como _glucose_, _pressure_ o _triceps_.
+
+Podemos observar que la muestra _S120_ es un outlier extremo para _Insulin_ y tambien es un outlier para _mass_.
+
+La muestra _S111_ es un outlier extremo para _Insulin_ y tambien es un outlier para _pedigree_, todo parece indicar que también es un outlier extremo para dicha variable.
+
+
+# Trabajo sobre varias columnas
+
+Los outliers seguirá siendo univariados, pero trabajo sobre varias columnas al mismo tiempo.
+
+```{r 8vo}
+indices.de.outliers.en.alguna.columna <- unlist(sapply(1:ncol(mydata.numeric), 
+                                                       vector_claves_outliers_IQR, 
+                                                       datos = mydata.numeric, 
+                                                       coef = 1.5 )
+                                                )
+# Índices de outliers en alguna columna
+indices.de.outliers.en.alguna.columna
+# Obtenemos las filas únicas con outliers en al menos 1 columna
+length(unique(indices.de.outliers.en.alguna.columna))
+```
+
+Hay `r length(unique(indices.de.outliers.en.alguna.columna))` filas con outliers en al menos una de las columnas
+
+Chequeo la cantidad de outliers extremos en alguna columna
+```{r 8vob}
+indices.de.outliers.extremos.en.alguna.columna <- unlist(sapply(1:ncol(mydata.numeric), 
+                                                       vector_claves_outliers_IQR, 
+                                                       datos = mydata.numeric, 
+                                                       coef = 3 )
+)
+
+# Índices de outliers extremos en alguna columna
+indices.de.outliers.extremos.en.alguna.columna
+# Obtenemos las filas únicas con outliers en al menos 1 columna
+length(unique(indices.de.outliers.extremos.en.alguna.columna))
+```
+
+En total `r length(unique(indices.de.outliers.extremos.en.alguna.columna))` filas tienen outliers extremos en almenos 1 de las columnas
+
+```{r 8voc}
+mydata.numeric.scaled[indices.de.outliers.extremos.en.alguna.columna, ]
+```
+
+Arriba vemos el dataframe de valores normalizados, de las muestras que son outlier extremo en alguna de las columnas. Podemos observar el caso de la muestra _S87_ que se dispara mucho tanto en la columna _mass_ como _pressure_. O el de la _S111_ que se dispara en _pedigree_ e _insulin_.
+
+**Nota: no mostre los outliers normales en alguna columna, para no generar un dataframe de `r length(unique(indices.de.outliers.en.alguna.columna))` filas**
+
+
+Construyo una función que devuelve un vector de índices de aquellos registros que tienen un outlier en alguna de las columnas
+```{r 8vod}
+vector_claves_outliers_IQR_en_alguna_columna <- function(datos, coef = 1.5) {
+  indices <- unlist(sapply(1:ncol(datos), 
+    vector_claves_outliers_IQR, 
+    datos = datos, 
+    coef = 1.5 )
+  )
+  indices
+}
+
+indices.de.outliers.en.alguna.columna.funcion <- vector_claves_outliers_IQR_en_alguna_columna(mydata.numeric)
+
+# Chequeo que coincidan los valores
+if(sum(indices.de.outliers.en.alguna.columna == indices.de.outliers.en.alguna.columna.funcion))
+{
+  print("Coincidencia. Función bien implementada.")
+} else {
+  print("Hay algo mal. Chequear la implementación de la función")
+}
+```
+
+La función esta implementada correctamente
+
+Función que devuelve un vector booleano indicando si una muestra en outlier en alguna columna
+```{r 8voe}
+vector_es_outlier_IQR_en_alguna_columna = function(datos, coef = 1.5){
+  indices.de.outliers.en.alguna.columna =  vector_claves_outliers_IQR_en_alguna_columna(datos, coef)
+  todos = c(1:nrow(datos))
+  bools = todos %in% indices.de.outliers.en.alguna.columna
+  return (bools)
+}
+
+outliers.en.alguna.columna.funcion <- vector_es_outlier_IQR_en_alguna_columna(mydata.numeric)
+outliers.en.alguna.columna.funcion
+```
+
+
+
+
+
+
+# UNIVARIATE STATISTICAL OUTLIERS -> 1-variate Normal Distribution
+
+Detección de Outliers en 1 variable normal aplicando tests estadísticos paramétricos.
+
+Genero datos con un outlier, para esto voy a tomar los valores de la columna Insulin del dataset pima,
+voy a quedarme con el outlier mas extremo, y remover el resto de outlier calculados en los puntos anteriores, además de downsamplear los datos.
+
+**Nota: Dejo el codigo utilizado para que se comprenda lo que realize.**
+  
+```{r B2_1a}
+aux <- columna # Columna tiene los valores de Insulin
+maximo <- max(columna) # Me quedo con el maximo
+
+# El vector.es.outlier.normal es un vector TRUE/FALSE con los datos de que valor es outlier
+vector.es.outlier.normal.aux <- vector.es.outlier.normal
+names(vector.es.outlier.normal.aux) <- rownames(mydata.numeric.backup)
+
+# Elimino los outliers
+aux <- aux[!vector.es.outlier.normal.aux]
+
+# Hago un downsample a 14 elementos
+set.seed(87)
+aux <- sample(x = aux, size = 14, replace = F)
+
+# Agrego el valor outlier maximo
+aux <- c(aux, maximo)
+
+# Ahora si tengo mis datos para trabajar
+datos.con.un.outlier <- aux
+mydata.numeric = datos.con.un.outlier
+max(mydata.numeric)
+```
+
+
+```{r B2_1}
+hist(mydata.numeric)
+plot(mydata.numeric)
+```
+
+Mostramos el histograma de mydata.numeric usando la función hist y un gráfico de puntos con la función plot.
+
+Observamos que hay un dato con un valor extremo, que es el outlier mas extremo que deje intencionalmente.
+
+```{r B2_2}
+test.de.Grubbs <- grubbs.test(mydata.numeric, two.sided = TRUE)
+test.de.Grubbs
+test.de.Grubbs$p.value
+```
+
+El test de Grubb's es un test estadístico usado para detectar outliers en un data set univariado, en el cual se asume que los datos vienen de una población normalmente distribuida.
+
+El test es capaz de detectar un outlier a la vez.
+
+Las hipótesis que se testean son las siguientes:
+
+- Ho: No hay outliers en los datos
+- Ha: Hay exactamente un outlier en los datos.
+
+El p-valor 1.995367E-05 es significativo con los valores de alpha usuales 0.025, 0.01. Por lo tanto rechazamos la hipótesis nula de que no hay outliers en los datos y aceptamos la hipótesis alternativa de que hay 1 outlier en los datos (el valor `r outlier(mydata.numeric)`).
+
+```{r B2_3}
+valor.de.outlier.Grubbs <- outlier(mydata.numeric)
+valor.de.outlier.Grubbs
+indice.de.outlier.Grubbs <- which(mydata.numeric == valor.de.outlier.Grubbs)
+indice.de.outlier.Grubbs
+```
+
+Obtuvimos el valor del outlier con la función _outlier_, luego obtuvimos el índice del outlier chequeando cual índice se corresponde con el valor obtenido.
+
+```{r B2_4}
+MiPlot_Univariate_Outliers(mydata.numeric, indice.de.outlier.Grubbs, "Outlier test de Grubbs")
+```
+
+La función MiPlot_Univariate_Outliers grafica los datos y marca el outlier con color rojo. Para esto toma como parámetros los datos y un vector booleano indicando el valor/es outlier.
+
+## El mismo proceso anterior empaquetado en una función 
+
+```{r B2_5}
+MiPlot_resultados_TestGrubbs(mydata.numeric)
+```
+
+La función MiPlot_resultados_TestGrubbs aplica el test de Grubbs y grafica los resultados. Además muestra por pantalla el p-valor del test, 1.995367E-05 en este caso, el índice del valor outlier detectado, el valor del mismo, y un vector booleano indicando cada indice si es outlier o no.
+
+
+Genero dos nuevos vectores, uno con dos outliers y otro con varios outliers
+
+```{r B2_6}
+# Agrego un nuevo outlier
+datos.con.dos.outliers.masking <- c(mydata.numeric, (max(mydata.numeric) - 50))
+# Datos con varios outliers
+datos.con.varios.outliers <- columna
+```
+
+## Datos.con.dos.outliers.masking
+```{r B2_7}
+plot(datos.con.dos.outliers.masking)
+test.de.Grubbs <- grubbs.test(datos.con.dos.outliers.masking, two.sided = TRUE)
+test.de.Grubbs$p.value
+test.de.Grubbs
+```
+
+El resultado no es significativo, pvalor: 0.06436966, el test no fue capaz de encontrar un outlier.
+Sufrimos el efecto de masking. La presencia de dos outliers mueve la media y el desvio estandar hacia ellos, haciendo que el estadístico no pueda detectarlos como outliers.
+
+
+## Datos con varios outliers
+```{r B2_7b}
+plot(datos.con.varios.outliers)
+test.de.Grubbs <- grubbs.test(datos.con.varios.outliers)
+test.de.Grubbs$p.value
+test.de.Grubbs
+```
+
+El test fue capaz de detectar un valor outlier, pvalor: 5.814236E-07, el outlier es el valor 846. Sin embargo en este caso teníamos varios outliers y el test solo nos informa la presencia de uno. Lo que se puede realizar es iterativamente ir eliminando el valor outlier y probando nuevamente hasta que el test no detecte la presencia de outliers.
+
+## Test de Rosner
+
+El test de Rosner permite detectar un número de outliers menor o igual a un valor determinado.
+
+En este caso vamos a probar con un valor de 4.
+```{r B2_8}
+test.de.rosner <- rosnerTest(datos.con.dos.outliers.masking, k = 4)
+test.de.rosner$all.stats$Outlier 
+test.de.rosner$all.stats$Obs.Num
+indices.outliers <- test.de.rosner$all.stats$Obs.Num[test.de.rosner$all.stats$Outlier]
+
+MiPlot_Univariate_Outliers(datos.con.dos.outliers.masking,
+indices.outliers,
+"Datos con dos outliers")
+
+```
+
+El test es capaz de detectar los dos outliers presentes en los datos. Luego le pasamos los índices de los outliers a la función MiPlot_Univariate_Outliers para graficar los datos y marcar en rojo los outliers.
+
+```{r B2_9}
+MiPlot_resultados_TestRosner(datos.con.dos.outliers.masking)
+```
+
+La función MiPlot_resultados_TestRosner automatiza la ejecución del test de Rosner y el gráfico de resultados.
+Además nos informa la siguiente información reelevante:
+
+- Índices de las observaciones con mayor desviación
+- Vector booleano indicando cuales de los índices anterior son outliers.
+- Índices de los outliers
+- Valores de los outliers
+- Número de datos analizados
+- Vector booleano indicando para todos los datos analizados cuales son outliers.
+
+```{r B2_10}
+MiPlot_resultados_TestRosner(datos.con.un.outlier)
+```
+
+Resultados de la funcion sobre el set de datos que tenía un único outlier, podemos observar como el test de Rosner lo identifica de forma óptima.
+
+
+```{r B2_11}
+plot(datos.con.varios.outliers)
+test.de.rosner <- rosnerTest(datos.con.varios.outliers, k = 4)
+test.de.rosner$all.stats$Outlier 
+test.de.rosner$all.stats$Obs.Num
+# Índices de los outliers
+indices.outliers <- test.de.rosner$all.stats$Obs.Num[test.de.rosner$all.stats$Outlier]
+indices.outliers
+# Valores de los outliers
+datos.con.varios.outliers[indices.outliers]
+```
+
+En este caso al tener varios outliers el dataset, el test de Rosner es capaz de encontrar 4, ya que estamos probando la hipótesis de que el dataset tiene 4 o menos outliers. Los valores de los outliers son `r datos.con.varios.outliers[indices.outliers]`
+
+Voy a probar con un valor de 30, la idea es ver si puedo encontrar los 25 outliers que fueron encontrados con el método IQR.
+
+```{r B2_11b}
+test.de.rosner <- rosnerTest(datos.con.varios.outliers, k = 30)
+test.de.rosner$all.stats$Outlier 
+test.de.rosner$all.stats$Obs.Num
+indices.outliers <- test.de.rosner$all.stats$Obs.Num
+```
+
+Se encuentran 17 outliers, se recibe una advertencia, que no se calcula el error para valores de k > 10
+
+
+# MULTIVARIATE STATISTICAL OUTLIERS -> Multivariate Normal Distribution --> Mahalanobis
+
+Detección de Outliers multivariantes en distribuciones conjuntas normales aplicando tests basados en la distancia de Mahalanobis
+
+## Obtención de los outliers multivariantes
+
+```{r C1_1}
+# Me quedo con 4 columnas del dataset: glucose, triceps, mass y pressure.
+mydata.numeric <- mydata.numeric.backup[,
+colnames(mydata.numeric.backup) 
+%in%
+c("glucose", "triceps", "mass", "pressure")]
+mydata.numeric.scaled <- mydata.numeric.scaled.backup[,
+colnames(mydata.numeric.scaled.backup) 
+%in%
+c("glucose", "triceps", "mass", "pressure")]
+
+set.seed(12)
+mvoutlier.plot <- uni.plot(mydata.numeric, symb = FALSE, alpha = 0.05)
+mvoutlier.plot$outliers
+
+```
+
+La función uni.plot obtiene los outliers calculando las distancias de Mahalanobis y usando la aproximación de la Chi cuadrado.
+
+La estimación de la matriz de covarianzas es la estimación robusta segón MCD (minimum covariance determinant).
+
+No hay que normalizar los datos ya que la distancia de Mahalanobis está diseñada, precisamente para evitar el problema de la escala.
+
+El grafico nos muestra los outliers univariantes para cada columna del dataset, pero sin su etiqueta.
+
+
+```{r C1_2}
+is.MCD.outlier <- mvoutlier.plot$outliers
+numero.de.outliers.MCD <- length(mvoutlier.plot$outliers[mvoutlier.plot$outliers == TRUE])
+indices.de.outliers.multivariantes.MCD <- which(mvoutlier.plot$outliers == TRUE)
+```
+
+El dataset tiene `r numero.de.outliers.MCD` outliers multivariantes segun el calculo de la distancia de Mahalanobis.
+
+Las siguientes observaciones son outliers multivariantes:
+
+```{r C1_3a}
+indices.de.outliers.multivariantes.MCD
+```
+
+Obtenemos los valores normalizados para los outliers multivariantes y mostramos un boxplots con las muestras etiquetadas.
+```{r C1_3}
+data.frame.solo.outliers <- mydata.numeric.scaled[is.MCD.outlier, ]
+data.frame.solo.outliers
+MiBoxPlot_juntos(mydata.numeric.scaled, is.MCD.outlier)  
+```
+
+A partir de la inspección del dataframe que nos indica que muestras son outliers multivariantes, podemos aprecir cual es el valor que más contribuye a ser un outlier en cada muestra, considerando que observamos el desvío del valor con respecto a la media. Aún asi, hay casos en que es complicado distinguir la relación entre variables que genera el outlier multivariante.
+
+Al observar los boxplots podemos discernir que muchas muestras son outliers multivariantes porque tambien son univariantes, pero hay muestras como ser S124 que no es un outlier univariante para ninguna variable, sin embargo es un outlier multivariante. Siendo en la variable _glucose_ donde es mas extremo.
+
+```{r C1_4}
+MiBiPlot_Multivariate_Outliers(mydata.numeric.scaled, is.MCD.outlier, "biplot outliers")
+```
+
+Observando el biplot podemos llegar a la misma conclusión con respecto a la muestra S124. No es un outlier univariante para ninguna columna, sino que es la combinación de valores para diferentes variables lo que lo convierte en outlier. 
+
+El biplot explica casi el 75% de la variabilidad de los datos.
+
+```{r C1_5}
+indices.de.outliers.en.alguna.columna <- vector_claves_outliers_IQR_en_alguna_columna(mydata.numeric)
+
+indices.de.outliers.multivariantes.MCD.pero.no.1variantes <- setdiff(indices.de.outliers.multivariantes.MCD,
+indices.de.outliers.en.alguna.columna)
+indices.de.outliers.multivariantes.MCD.pero.no.1variantes
+```
+
+Podemos observar que los índices `r indices.de.outliers.multivariantes.MCD.pero.no.1variantes` se corresponden a dichas muestras son outliers multivariantes, pero no univariantes en ninguna de las 4 columnas analizadas. Es decir que si miramos cada columna por separado, estos cuatro valores no seran outliers en ninguna de ellas, pero la combinacion de valoers en diferentes columnas los convierte en outliers.
+
+Vamos a graficar estos 4 outliers.
+```{r C1_5b}
+MiPlot_Univariate_Outliers(mydata.numeric, 
+indices.de.outliers.multivariantes.MCD.pero.no.1variantes, 
+"Outliers multivariantes pero no 1 variantes")
+```
+
+Vamos a realizarlo para cada uno por separado:
+
+- S2
+```{r C1_5b2}
+MiPlot_Univariate_Outliers(mydata.numeric, 
+2, 
+"Outliers multivariante S2")
+```
+
+- S27
+```{r C1_5c}
+MiPlot_Univariate_Outliers(mydata.numeric, 
+27, 
+"Outliers multivariante S27")
+```
+
+- S124
+```{r C1_5d}
+MiPlot_Univariate_Outliers(mydata.numeric, 
+124, 
+"Outliers multivariante S124")
+```
+
+- S129
+```{r C1_5e}
+MiPlot_Univariate_Outliers(mydata.numeric, 
+129, 
+"Outliers multivariante S129")
+```
+
+
+# MULTIVARIATE STATISTICAL OUTLIERS -> LOF 
+
+Detección de Outliers multivariantes según el método LOF.
+
+```{r D1_1}
+mis.datos.numericos <- mydata.numeric.backup
+mis.datos.numericos.normalizados <- mydata.numeric.scaled.backup
+
+corr.plot(mis.datos.numericos[,3], mis.datos.numericos[,4]) 
+MiBiplot(mis.datos.numericos)
+```
+
+
+
+## DISTANCE BASED OUTLIERS (LOF)
+```{r D1_2}
+numero.de.vecinos.lof = 10
+lof.scores <- lofactor(mis.datos.numericos.normalizados, numero.de.vecinos.lof)
+plot(lof.scores)
+```
+
+Etablecí en 10 el número de vecinos a considerar para el calculo de los scores de LOF.
+
+La función lofactor devuelve un vector con los scores de LOF de todos los registros
+
+Asumimos que los valores con un score LOF >= 1.5 son outliers.
+
+```{r D1_2b}
+numero.de.outliers = sum(lof.scores >= 1.5)
+```
+
+Hay `r sum(lof.scores >= 1.5)` outliers de acuerdo al score LOF, considerando outliers aquellos con un score LOF >= 1.5.
+
+```{r D1_2c}
+indices.de.lof.outliers.ordenados <- sort(lof.scores, index.return = TRUE, 
+                                          decreasing = TRUE)$ix
+indices.de.lof.top.outliers <- indices.de.lof.outliers.ordenados[1:numero.de.outliers]
+indices.de.lof.top.outliers.reformat <- paste("S", 
+                                              indices.de.lof.top.outliers, sep = "")
+is.lof.outlier <- row.names(mis.datos.numericos) %in% 
+  indices.de.lof.top.outliers.reformat
+MiBiPlot_Multivariate_Outliers(mis.datos.numericos.normalizados, 
+                               is.lof.outlier, "Biplot outliers")
+```
+
+Obtuve el indice de los outliers y luego grafique un biplot. Hay algunos valores como S8, S348, S58, S266 que no parecen ser outliers univariantes. Lo podemos chequear.
+
+
+```{r D1_3}
+vector.claves.outliers.IQR.en.alguna.columna <- 
+  vector_claves_outliers_IQR_en_alguna_columna(mis.datos.numericos)
+vector.es.outlier.IQR.en.alguna.columna <- 
+  vector_es_outlier_IQR_en_alguna_columna(mis.datos.numericos)
+MiBiPlot_Multivariate_Outliers(mis.datos.numericos.normalizados, 
+                               vector.es.outlier.IQR.en.alguna.columna, 
+                               "Biplot outliers IQR en alguna columna")
+indices.de.outliers.multivariantes.LOF.pero.no.1variantes <- 
+  setdiff(indices.de.lof.top.outliers,
+vector.claves.outliers.IQR.en.alguna.columna)
+indices.de.outliers.multivariantes.LOF.pero.no.1variantes
+```
+
+266 es el valor que no es un outlier univariante y si es un outlier LOF. Se corresponde a la muestra S266.
+
+# MULTIVARIATE STATISTICAL OUTLIERS. CLUSTERING OUTLIERS 
+
+Detección de Outliers multivariantes según los métodos basados en clustering.
+
+```{r D2_1}
+numero.de.outliers   = 5
+numero.de.clusters   = 2
+
+set.seed(2)  # Para establecer la semilla para la primera iteraci?n de kmeans
+```
+
+## kmeans
+```{r D2_2}
+modelo.kmeans <- kmeans(mis.datos.numericos.normalizados, centers = numero.de.clusters)
+indices.clustering.pima <- modelo.kmeans$cluster
+centroides.normalizados.pima <- modelo.kmeans$centers
+indices.clustering.pima
+centroides.normalizados.pima
+```
+
+Se realizo un clustering con k-means con un parámetro de k = `r numero.de.clusters`. Se obtuvieron las asignaciones de a que grupo pertenece cada valor en la variable _indices.clustering.pima_, y los centroides de cada grupo en la variable _centroides.normalizados.pima_.
+
+
+
+```{r D2_4}
+# Función para calcular distancia euclídea a los centroides
+distancias_a_centroides = function (datos.normalizados, 
+indices.asignacion.clustering, 
+datos.centroides.normalizados){
+
+sqrt(rowSums(   (datos.normalizados - 
+                   datos.centroides.normalizados[indices.asignacion.clustering,])^2   ))
+}
+
+dist.centroides.pima <- distancias_a_centroides(mis.datos.numericos.normalizados, 
+indices.clustering.pima,
+centroides.normalizados.pima)
+
+top.outliers.pima <- order(dist.centroides.pima, decreasing = TRUE)[1:numero.de.outliers]
+top.outliers.pima
+
+```
+
+Se calculo la distancia de cada valor, al centroide del grupo al que fue asignado en el proceso de clustering. La distancia calculada es la **distancia euclídea**.
+Luego se obtuvieron los top outliers, previamente se definio que se considerarían como outliers los `r numero.de.outliers` valores más alejados del centroide de su cluster. Los índices de los outliers son los siguientes `r top.outliers.pima`.
+
+```{r D2_5}
+# Funcion que automatiza la búsqueda de outliers
+top_clustering_outliers <- function(datos.normalizados, 
+indices.asignacion.clustering, 
+datos.centroides.normalizados, 
+numero.de.outliers) {
+
+dist.centroides <- distancias_a_centroides(datos.normalizados, 
+indices.asignacion.clustering,
+datos.centroides.normalizados)
+
+top.outliers <- order(dist.centroides, decreasing = TRUE)[1:numero.de.outliers]
+res <- list(indices = top.outliers, distancias = dist.centroides[top.outliers])
+}
+
+```
+
+
+```{r D2_6}
+top.outliers.kmeans <- top_clustering_outliers(mis.datos.numericos.normalizados,
+indices.clustering.pima,
+centroides.normalizados.pima,
+numero.de.outliers)
+
+top.outliers.kmeans$indices
+top.outliers.kmeans$distancias
+```
+
+La función top_clustering_outliers automatiza la búsqueda de outliers de acuerdo al método de clustering.
+Esta función devuelve una lista con los índices y las distancias a sus centroides de los outliers. Esta información la imprimimos por pantalla.
+
+
+```{r D2_7}
+numero.de.datos   = nrow(mis.datos.numericos)
+is.kmeans.outlier = rep(FALSE, numero.de.datos) 
+is.kmeans.outlier[top.outliers.kmeans$indices] = TRUE
+# is.kmeans.outlier[top.outliers.kmeans.distancia.relativa] = TRUE
+
+
+BIPLOT.isOutlier             = is.kmeans.outlier
+# BIPLOT.cluster.colors        = c("blue","red","brown")     # Tantos colores como diga numero.de.clusters
+BIPLOT.cluster.colors        = c("blue","red")     # Tantos colores como diga numero.de.clusters
+BIPLOT.asignaciones.clusters = indices.clustering.pima
+MiBiPlot_Clustering_Outliers(mis.datos.numericos, "K-Means Clustering Outliers")
+
+```
+
+Generé un vector booleano indicando para cada valor si es un outlier por el método de clustering o no. Luego setee unos parámetros de forma global para ejecutar la funcion MiBiPlot_Clustering_Outliers que grafica un biplot de los outliers identificados por el método de clustering.
+Se puede ver marcados con una x los datos que se consideran outliers.
+
+```{r D2_8}
+mis.datos.medias <- colMeans(mis.datos.numericos)
+mis.datos.desviaciones <- apply(X = mis.datos.numericos, MARGIN = 2, FUN = sd)
+aux1 <- sweep(centroides.normalizados.pima, 2, mis.datos.desviaciones, FUN="*")
+centroides.valores <- sweep(aux1, 2, mis.datos.medias, FUN="+")
+centroides.valores
+```
+
+A partir de los datos normalizados, "revertimos" el proceso de normalización para obtener los valores originales de los centroides de los `r numero.de.clusters` clusters que obtuvimos con k-means.
+
+
+```{r D2_9}
+top_clustering_outliers_distancia_mahalanobis = function(datos,
+                                                         indices.asignacion.clustering,
+                                                         numero.de.outliers){
+
+  cluster.ids = unique(indices.asignacion.clustering)
+  k           = length(cluster.ids)
+  seleccion   = sapply(1:k, function(x) indices.asignacion.clustering == x)
+
+
+  # Usando medias y covarianzas:
+  # lista.matriz.de.covarianzas   = lapply(1:k, function(x) cov(mis.datos.numericos[seleccion[,x],]))
+  # lista.vector.de.medias        = lapply(1:k, function(x) colMeans(mis.datos.numericos[seleccion[,x],]))
+
+
+  # Usando la estimaci?n robusta de la media y covarianza: (cov.rob del paquete MASS:
+  lista.matriz.de.covarianzas   = 
+    lapply(1:k, function(x) cov.rob(mis.datos.numericos[seleccion[,x],])$cov)
+  lista.vector.de.medias        = 
+    lapply(1:k, function(x) cov.rob(mis.datos.numericos[seleccion[,x],])$center)
+
+
+  mah.distances   = lapply(1:k,
+                           function(x) mahalanobis(mis.datos.numericos[seleccion[,x],],
+                                                   lista.vector.de.medias[[x]],
+                                                   lista.matriz.de.covarianzas[[x]]))
+
+  todos.juntos = unlist(mah.distances)
+  todos.juntos.ordenados = names(todos.juntos[order(todos.juntos, decreasing=TRUE)])
+  indices.top.mah.outliers = as.numeric(todos.juntos.ordenados[1:numero.de.outliers])
+
+
+  list(distancias = mah.distances[indices.top.mah.outliers]  , 
+       indices = indices.top.mah.outliers)
+}
+
+top.clustering.outliers.mah = top_clustering_outliers_distancia_mahalanobis(mis.datos.numericos,
+                                                                            indices.clustering.pima,
+                                                                            numero.de.outliers)
+
+numero.de.datos = nrow(mis.datos.numericos)
+is.kmeans.outlier.mah = rep(FALSE, numero.de.datos)
+is.kmeans.outlier.mah[top.clustering.outliers.mah$indices] = TRUE
+
+BIPLOT.isOutlier             = is.kmeans.outlier.mah
+BIPLOT.cluster.colors        = c("blue","red","brown")     # Tantos colores como diga numero.de.clusters
+BIPLOT.asignaciones.clusters = indices.clustering.pima
+MiBiPlot_Clustering_Outliers(mis.datos.numericos, "K-Means Clustering Outliers")
+
+```
+
+En este caso construimos una función que pare el calculo de cada punto a su centroide utiliza la distancia de Mahalanobis.
+
+```{r D2_10}
+top_clustering_outliers_distancia_relativa = function(datos.normalizados, 
+                                                      indices.asignacion.clustering, 
+                                                      datos.centroides.normalizados, 
+                                                      numero.de.outliers){
+  
+  dist_centroides = distancias_a_centroides (datos.normalizados, 
+                                             indices.asignacion.clustering, 
+                                             datos.centroides.normalizados)
+  
+  cluster.ids = unique(indices.asignacion.clustering)
+  k           = length(cluster.ids)
+  
+  distancias.a.centroides.por.cluster    = 
+    sapply(1:k , function(x) dist_centroides [indices.asignacion.clustering  == cluster.ids[x]])
+  
+  distancias.medianas.de.cada.cluster    = 
+    sapply(1:k , function(x) median(dist_centroides[[x]]))
+  
+  todas.las.distancias.medianas.de.cada.cluster  =  
+    distancias.medianas.de.cada.cluster[indices.asignacion.clustering]
+  ratios = dist_centroides   /  todas.las.distancias.medianas.de.cada.cluster
+  
+  indices.top.outliers = order(ratios, decreasing=T)[1:numero.de.outliers]
+  
+  list(distancias = ratios[indices.top.outliers]  , indices = indices.top.outliers)
+}
+
+
+
+top.outliers.kmeans.distancia.relativa = 
+  top_clustering_outliers_distancia_relativa(mis.datos.numericos.normalizados, 
+    indices.clustering.pima, 
+    centroides.normalizados.pima, 
+    numero.de.outliers)
+
+
+cat("?ndices de los top k clustering outliers (k-means, usando distancia relativa)")
+top.outliers.kmeans.distancia.relativa$indices 
+cat("Distancias a sus centroides de los top k clustering outliers (k-means, usando distancia relativa)")
+top.outliers.kmeans.distancia.relativa$distancias
+
+```
+
